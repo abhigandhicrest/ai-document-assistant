@@ -14,14 +14,14 @@ Laravel and Python stay separate. Laravel handles pages, login, and the PDF the 
 
 If search finds no passages, the API says so and does not call the model. A scanned PDF with no text layer cannot be read. This service does not perform OCR.
 
-Processing is synchronous. A large PDF, or the first download of the embedding model, can take longer than Laravel's 60 second limit. Ask the question again after that first download finishes.
+Processing is synchronous. A large PDF, or the first load of the embedding model, can take longer than a minute. Laravel waits up to `AI_PYTHON_TIMEOUT` seconds (180 in `.env.example`) and then stores a generic failure if Python has not answered yet.
 
 ## Project layout
 
 | Path | Purpose |
 | --- | --- |
 | `app/main.py` | Creates the FastAPI app and registers routes. |
-| `app/config.py` | Reads settings such as host, port, and future model names. |
+| `app/config.py` | Reads host, port, chunking, embedding, Chroma, and language-model settings. |
 | `app/api/routes/health.py` | The health endpoint. |
 | `app/api/routes/documents.py` | Upload, list, inspect, process, and delete documents. |
 | `app/api/routes/chat.py` | `POST /api/chat/ask` for a document that is already indexed. |
@@ -137,11 +137,9 @@ Restart the Python process after changing `.env`. The key is read from the envir
 
 ## Laravel
 
-Laravel is already set to `AI_DRIVER=python` and `AI_PYTHON_URL=http://127.0.0.1:8001/ask`. No Laravel file has to change. The website keeps the PDF in `storage/app/private`. When someone asks a question, Python reads that file, indexes it on the first question, and sends the matching passages to the language model.
+The website setup, login, and the upload-then-question flow are documented in the root [README](../README.md). Laravel posts each question to `POST /ask`. That call indexes the private PDF on the first question. `POST /api/documents/upload` is a separate API path: it only stores the file until `POST /api/documents/{document_id}/process`.
 
-To clear local search data, stop the API and delete the files inside `python-ai/storage/chroma` and `python-ai/storage/metadata`. Leave the `.gitkeep` files. Do not delete Laravel's `storage/app/private` if you still want those PDFs.
-
-This local API does not have user accounts. Laravel checks that the logged-in user owns the document before it calls Python. Do not expose port 8001 to the internet without `API_TOKEN` and a host firewall. The service does not return stack traces or file paths.
+This API has no user accounts. Laravel checks that the logged-in user owns the document before it calls Python. Do not expose port 8001 beyond this machine unless `API_TOKEN` is set. The service does not return stack traces or file paths.
 
 A healthy response is:
 
@@ -152,13 +150,13 @@ A healthy response is:
 }
 ```
 
-Upload a PDF with:
+Upload a PDF directly to this API with:
 
 ```powershell
 curl.exe -F "file=@C:\path\to\notes.pdf" http://127.0.0.1:8001/api/documents/upload
 ```
 
-A successful upload returns the document id, the original filename, status `uploaded`, and a short message. It does not return the folder where the file was saved. The file still needs a later processing step before it can be searched. `MAX_UPLOAD_SIZE_MB` in `.env` limits the size. The default is 10 MB.
+A successful upload returns the document id, the original filename, status `uploaded`, and a short message. It does not return the folder where the file was saved. Call `POST /api/documents/{document_id}/process` before `POST /api/chat/ask`. `MAX_UPLOAD_SIZE_MB` limits this API upload. The default is 10 MB. The website upload limit is Laravel's `AI_MAX_UPLOAD_KB`.
 
 ## Tests
 
@@ -168,8 +166,8 @@ A successful upload returns the document id, the original filename, status `uplo
 
 The tests call the API inside the process. They build small PDFs in memory, use temporary folders, and do not download models or call an external AI API.
 
-## Laravel
-
 ## Storage
 
 `storage/uploads` receives PDFs from the Python upload route. `storage/metadata` holds the SQLite status file. `storage/chroma` holds the vector index. Do not put these folders under Laravel's `public/` directory. Real files written there stay out of git; only the empty `.gitkeep` files are tracked.
+
+To clear local search data, stop the API and delete the files inside `storage/chroma` and `storage/metadata`. Leave the `.gitkeep` files. Leave Laravel's `storage/app/private` in place if those uploaded PDFs should remain.

@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+storage/uploads/*
+!storage/uploads/.gitkeep
+storage/chroma/*
+!storage/chroma/.gitkeep
+storage/metadata/*
+!storage/metadata/.gitkeep
